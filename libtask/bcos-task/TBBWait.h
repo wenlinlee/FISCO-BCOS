@@ -65,6 +65,6 @@ auto syncWait(auto&& task) -> AwaitableReturnType<std::remove_cvref_t<decltype(t
     {
         return std::move(std::get<ReturnType>(value));
     }
-};
+}
 
 }  // namespace bcos::task::tbb
