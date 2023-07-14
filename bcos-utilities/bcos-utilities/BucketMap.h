@@ -31,566 +31,568 @@
 namespace bcos
 {
 
-class EmptyType
-{
-};
-
-template <class KeyType, class ValueType>
-class Bucket : public std::enable_shared_from_this<Bucket<KeyType, ValueType>>
-{
-public:
-    using Ptr = std::shared_ptr<Bucket>;
-    using MapType = std::unordered_map<KeyType, ValueType>;
-
-    Bucket() = default;
-    Bucket(const Bucket&) = default;
-    Bucket(Bucket&&) = default;
-    Bucket& operator=(const Bucket&) = default;
-    Bucket& operator=(Bucket&&) noexcept = default;
-
-    class WriteAccessor
+    class EmptyType
     {
-    public:
-        using Ptr = std::shared_ptr<WriteAccessor>;
-
-        WriteAccessor(Bucket::Ptr bucket)
-          : m_bucket(std::move(bucket)), m_writeGuard(m_bucket->getMutex())
-        {}
-
-        WriteAccessor(Bucket::Ptr bucket, WriteGuard guard)
-          : m_bucket(std::move(bucket)), m_writeGuard(std::move(guard))
-        {}
-
-        void setValue(typename MapType::iterator it) { m_it = it; };
-
-        const KeyType& key() { return m_it->first; }
-        ValueType& value() { return m_it->second; }
-
-    private:
-        typename Bucket::Ptr m_bucket;
-        typename MapType::iterator m_it;
-        WriteGuard m_writeGuard;
     };
 
-    class ReadAccessor
+    template <class KeyType, class ValueType, class MapType = std::unordered_map<KeyType, ValueType>>
+    class Bucket : public std::enable_shared_from_this<Bucket<KeyType, ValueType, MapType>>
     {
     public:
-        using Ptr = std::shared_ptr<ReadAccessor>;
+        using Ptr = std::shared_ptr<Bucket>;
 
-        ReadAccessor(Bucket::Ptr bucket)
-          : m_bucket(std::move(bucket)), m_readGuard(m_bucket->getMutex())
-        {}
-        ReadAccessor(Bucket::Ptr bucket, ReadGuard guard)
-          : m_bucket(std::move(bucket)), m_readGuard(std::move(guard))
-        {}
+        Bucket() = default;
+        Bucket(const Bucket&) = default;
+        Bucket(Bucket&&) = default;
+        Bucket& operator=(const Bucket&) = default;
+        Bucket& operator=(Bucket&&) noexcept = default;
 
-        void setValue(typename MapType::iterator it) { m_it = it; };
-
-        const KeyType& key() { return m_it->first; }
-        const ValueType& value() { return m_it->second; }
-
-
-    private:
-        typename Bucket::Ptr m_bucket;
-        typename MapType::iterator m_it;
-        ReadGuard m_readGuard;
-    };
-
-    // return true if the lock has acquired
-    bool acquireAccessor(typename WriteAccessor::Ptr& accessor, bool wait)
-    {
-        WriteGuard guard = wait ? WriteGuard(m_mutex) : WriteGuard(m_mutex, boost::try_to_lock);
-        if (guard.owns_lock())
+        class WriteAccessor
         {
-            accessor = std::make_shared<WriteAccessor>(
-                this->shared_from_this(), std::move(guard));  // acquire lock here
-            return true;
-        }
-        else
+        public:
+            using Ptr = std::shared_ptr<WriteAccessor>;
+
+            WriteAccessor(Bucket::Ptr bucket)
+                    : m_bucket(std::move(bucket)), m_writeGuard(m_bucket->getMutex())
+            {}
+
+            WriteAccessor(Bucket::Ptr bucket, WriteGuard guard)
+                    : m_bucket(std::move(bucket)), m_writeGuard(std::move(guard))
+            {}
+
+            void setValue(typename MapType::iterator it) { m_it = it; };
+
+            const KeyType& key() { return m_it->first; }
+            ValueType& value() { return m_it->second; }
+
+        private:
+            typename Bucket::Ptr m_bucket;
+            typename MapType::iterator m_it;
+            WriteGuard m_writeGuard;
+        };
+
+        class ReadAccessor
         {
-            return false;
-        }
-    }
+        public:
+            using Ptr = std::shared_ptr<ReadAccessor>;
 
-    // return true if the lock has acquired
-    bool acquireAccessor(typename ReadAccessor::Ptr& accessor, bool wait)
-    {
-        ReadGuard guard = wait ? ReadGuard(m_mutex) : ReadGuard(m_mutex, boost::try_to_lock);
-        if (guard.owns_lock())
+            ReadAccessor(Bucket::Ptr bucket)
+                    : m_bucket(std::move(bucket)), m_readGuard(m_bucket->getMutex())
+            {}
+            ReadAccessor(Bucket::Ptr bucket, ReadGuard guard)
+                    : m_bucket(std::move(bucket)), m_readGuard(std::move(guard))
+            {}
+
+            void setValue(typename MapType::iterator it) { m_it = it; };
+
+            const KeyType& key() { return m_it->first; }
+            const ValueType& value() { return m_it->second; }
+
+
+        private:
+            typename Bucket::Ptr m_bucket;
+            typename MapType::iterator m_it;
+            ReadGuard m_readGuard;
+        };
+
+        // return true if the lock has acquired
+        bool acquireAccessor(typename WriteAccessor::Ptr& accessor, bool wait)
         {
-            accessor = std::make_shared<ReadAccessor>(
-                this->shared_from_this(), std::move(guard));  // acquire lock here
-            return true;
-        }
-        else
-        {
-            return false;
-        }
-    }
-
-
-    // return true if found
-    template <class AccessorType>
-    bool find(typename AccessorType::Ptr& accessor, const KeyType& key)
-    {
-        if (!accessor)
-        {
-            accessor =
-                std::make_shared<AccessorType>(this->shared_from_this());  // acquire lock here
-        }
-
-        auto it = m_values.find(key);
-        if (it == m_values.end())
-        {
-            return false;
-        }
-        else
-        {
-            accessor->setValue(it);
-            return true;
-        }
-    }
-
-    // return true if insert happen
-    bool insert(typename WriteAccessor::Ptr& accessor, const std::pair<KeyType, ValueType>& kv)
-    {
-        if (!accessor)
-        {
-            accessor =
-                std::make_shared<WriteAccessor>(this->shared_from_this());  // acquire lock here
-        }
-        auto [it, inserted] = m_values.try_emplace(kv.first, kv.second);
-        accessor->setValue(it);
-        return inserted;
-    }
-
-    // return {} if not exists before remove
-    ValueType remove(const KeyType& key)
-    {
-        bcos::WriteGuard guard(m_mutex);
-
-        auto it = m_values.find(key);
-        if (it == m_values.end())
-        {
-            return {};
-        }
-
-        ValueType ret = std::move(it->second);
-        m_values.erase(it);
-        return ret;
-    }
-
-
-    // return true if remove success
-    std::pair<bool, ValueType> remove(typename WriteAccessor::Ptr& accessor, const KeyType& key)
-    {
-        if (!accessor)
-        {
-            accessor =
-                std::make_shared<WriteAccessor>(this->shared_from_this());  // acquire lock here
-        }
-
-        auto it = m_values.find(key);
-        if (it == m_values.end())
-        {
-            return {false, {}};
-        }
-        else
-        {
-            auto value = std::move(it->second);
-            m_values.erase(it);
-            return {true, std::move(value)};
-        }
-    }
-
-    size_t size() { return m_values.size(); }
-    bool contains(const KeyType& key)
-    {
-        ReadGuard guard(m_mutex);
-        return m_values.contains(key);
-    }
-
-    // return true if need continue
-    template <class AccessorType>  // handler return isContinue
-    bool forEach(std::function<bool(typename AccessorType::Ptr)> handler,
-        typename AccessorType::Ptr accessor = nullptr)
-    {
-        if (!accessor)
-        {
-            accessor =
-                std::make_shared<AccessorType>(this->shared_from_this());  // acquire lock here
-        }
-
-        for (auto it = m_values.begin(); it != m_values.end(); it++)
-        {
-            accessor->setValue(it);
-            if (!handler(accessor))
+            WriteGuard guard = wait ? WriteGuard(m_mutex) : WriteGuard(m_mutex, boost::try_to_lock);
+            if (guard.owns_lock())
+            {
+                accessor = std::make_shared<WriteAccessor>(
+                        this->shared_from_this(), std::move(guard));  // acquire lock here
+                return true;
+            }
+            else
             {
                 return false;
             }
         }
-        return true;
-    }
 
-    void clear(typename WriteAccessor::Ptr& accessor,
-        std::function<void(bool, const KeyType&, typename WriteAccessor::Ptr)> onRemove = nullptr)
-    {
-        if (!accessor)
+        // return true if the lock has acquired
+        bool acquireAccessor(typename ReadAccessor::Ptr& accessor, bool wait)
         {
-            accessor =
-                std::make_shared<WriteAccessor>(this->shared_from_this());  // acquire lock here
-        }
-
-        for (auto it = m_values.begin(); it != m_values.end(); it++)
-        {
-            if (onRemove)
+            ReadGuard guard = wait ? ReadGuard(m_mutex) : ReadGuard(m_mutex, boost::try_to_lock);
+            if (guard.owns_lock())
             {
-                onRemove(true, it->first, accessor);
+                accessor = std::make_shared<ReadAccessor>(
+                        this->shared_from_this(), std::move(guard));  // acquire lock here
+                return true;
+            }
+            else
+            {
+                return false;
             }
         }
 
-        m_values.clear();
-    }
 
-    SharedMutex& getMutex() { return m_mutex; }
-
-private:
-    MapType m_values;
-    mutable SharedMutex m_mutex;
-};
-
-template <class KeyType, class ValueType, class BucketHasher = std::hash<KeyType>>
-class BucketMap
-{
-public:
-    using Ptr = std::shared_ptr<BucketMap>;
-    using WriteAccessor = typename Bucket<KeyType, ValueType>::WriteAccessor;
-    using ReadAccessor = typename Bucket<KeyType, ValueType>::ReadAccessor;
-
-    BucketMap(size_t bucketSize)
-    {
-        for (size_t i = 0; i < bucketSize; i++)
+        // return true if found
+        template <class AccessorType>
+        bool find(typename AccessorType::Ptr& accessor, const KeyType& key)
         {
-            m_buckets.push_back(std::make_shared<Bucket<KeyType, ValueType>>());
-        }
-    }
-
-    virtual ~BucketMap(){};
-    // return true if found
-    template <class AccessorType>
-    bool find(typename AccessorType::Ptr& accessor, const KeyType& key)
-    {
-        auto idx = getBucketIndex(key);
-        auto bucket = m_buckets[idx];
-        return bucket->template find<AccessorType>(accessor, key);
-    }
-
-    // handler: accessor is nullptr if not found, handler return false to break to find
-    template <class AccessorType>
-    void batchFind(
-        const auto& keys, std::function<bool(const KeyType&, typename AccessorType::Ptr)> handler)
-    {
-        forEach<AccessorType>(keys, [handler = std::move(handler)](const KeyType& key,
-                                        typename Bucket<KeyType, ValueType>::Ptr bucket,
-                                        typename AccessorType::Ptr accessor) {
-            bool has = bucket->template find<AccessorType>(accessor, key);
-            return handler(key, has ? accessor : nullptr);
-        });
-    }
-
-    void batchInsert(const auto& kvs,
-        std::function<void(bool, const KeyType&, typename WriteAccessor::Ptr)> onInsert)
-    {
-        forEach<WriteAccessor>(kvs, [onInsert = std::move(onInsert)](decltype(kvs.front()) kv,
-                                        typename Bucket<KeyType, ValueType>::Ptr bucket,
-                                        typename WriteAccessor::Ptr accessor) {
-            bucket->insert(accessor, kv);
-            return true;
-        });
-    }
-
-    void batchInsert(const auto& kvs)
-    {
-        batchInsert(kvs, [](bool, const KeyType&, typename WriteAccessor::Ptr) {});
-    }
-
-    void batchRemove(
-        const auto& keys, std::function<void(bool, const KeyType&, const ValueType&)> onRemove)
-    {
-        forEach<WriteAccessor>(keys, [onRemove = std::move(onRemove)](const KeyType& key,
-                                         typename Bucket<KeyType, ValueType>::Ptr bucket,
-                                         typename WriteAccessor::Ptr accessor) {
-            auto [success, value] = bucket->remove(accessor, key);
-            onRemove(success, key, value);
-            return true;
-        });
-    }
-
-    void batchRemove(const auto& keys)
-    {
-        batchRemove(keys, [](bool, const KeyType&, const ValueType&) {});
-    }
-
-    bool insert(typename WriteAccessor::Ptr& accessor, std::pair<KeyType, ValueType> kv)
-    {
-        auto idx = getBucketIndex(kv.first);
-        auto bucket = m_buckets[idx];
-        return bucket->insert(accessor, std::move(kv));
-    }
-
-    ValueType remove(const KeyType& key)
-    {
-        auto idx = getBucketIndex(key);
-        auto bucket = m_buckets[idx];
-        return bucket->remove(key);
-    }
-
-    size_t size() const
-    {
-        size_t size = 0;
-        for (const auto& bucket : m_buckets)
-        {
-            size += bucket->size();
-        }
-        return size;
-    }
-
-    bool empty() const { return size() == 0; }
-
-    bool contains(const KeyType& key)
-    {
-        auto idx = getBucketIndex(key);
-        auto bucket = m_buckets[idx];
-        return bucket->contains(key);
-    }
-
-    void clear(std::function<void(bool, const KeyType&, const ValueType&)> onRemove = nullptr)
-    {
-        if (!onRemove) [[likely]]
-        {
-            for (size_t i = 0; i < m_buckets.size(); i++)
+            if (!accessor)
             {
-                m_buckets[i] = std::make_shared<Bucket<KeyType, ValueType>>();
+                accessor =
+                        std::make_shared<AccessorType>(this->shared_from_this());  // acquire lock here
+            }
+
+            auto it = m_values.find(key);
+            BCOS_LOG(DEBUG) << LOG_KV("it ?= m_values.end()",it == m_values.end()) << LOG_KV("it->first", it->first) << LOG_KV("it->second", it->second)
+                            << LOG_KV("m_values.end()->first", m_values.end()->first) << LOG_KV("m_values.end()->second", m_values.end()->second);
+            if (it == m_values.end())
+            {
+                return false;
+            }
+            else
+            {
+                accessor->setValue(it);
+                return true;
             }
         }
-        else
+
+        // return true if insert happen
+        bool insert(typename WriteAccessor::Ptr& accessor, const std::pair<KeyType, ValueType>& kv)
+        {
+            if (!accessor)
+            {
+                accessor =
+                        std::make_shared<WriteAccessor>(this->shared_from_this());  // acquire lock here
+            }
+            auto [it, inserted] = m_values.try_emplace(kv.first, kv.second);
+            accessor->setValue(it);
+            return inserted;
+        }
+
+        // return {} if not exists before remove
+        ValueType remove(const KeyType& key)
+        {
+            bcos::WriteGuard guard(m_mutex);
+
+            auto it = m_values.find(key);
+            if (it == m_values.end())
+            {
+                return {};
+            }
+
+            ValueType ret = std::move(it->second);
+            m_values.erase(it);
+            return ret;
+        }
+
+
+        // return true if remove success
+        std::pair<bool, ValueType> remove(typename WriteAccessor::Ptr& accessor, const KeyType& key)
+        {
+            if (!accessor)
+            {
+                accessor =
+                        std::make_shared<WriteAccessor>(this->shared_from_this());  // acquire lock here
+            }
+
+            auto it = m_values.find(key);
+            if (it == m_values.end())
+            {
+                return {false, {}};
+            }
+            else
+            {
+                auto value = std::move(it->second);
+                m_values.erase(it);
+                return {true, std::move(value)};
+            }
+        }
+
+        size_t size() { return m_values.size(); }
+        bool contains(const KeyType& key)
+        {
+            ReadGuard guard(m_mutex);
+            return m_values.contains(key);
+        }
+
+        // return true if need continue
+        template <class AccessorType>  // handler return isContinue
+        bool forEach(std::function<bool(typename AccessorType::Ptr)> handler,
+                     typename AccessorType::Ptr accessor = nullptr)
+        {
+            if (!accessor)
+            {
+                accessor =
+                        std::make_shared<AccessorType>(this->shared_from_this());  // acquire lock here
+            }
+
+            for (auto it = m_values.begin(); it != m_values.end(); it++)
+            {
+                accessor->setValue(it);
+                if (!handler(accessor))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        void clear(typename WriteAccessor::Ptr& accessor,
+                   std::function<void(bool, const KeyType&, typename WriteAccessor::Ptr)> onRemove = nullptr)
+        {
+            if (!accessor)
+            {
+                accessor =
+                        std::make_shared<WriteAccessor>(this->shared_from_this());  // acquire lock here
+            }
+
+            for (auto it = m_values.begin(); it != m_values.end(); it++)
+            {
+                if (onRemove)
+                {
+                    onRemove(true, it->first, accessor);
+                }
+            }
+
+            m_values.clear();
+        }
+
+        SharedMutex& getMutex() { return m_mutex; }
+
+    protected:
+        MapType m_values;
+        mutable SharedMutex m_mutex;
+    };
+
+    template <class KeyType, class ValueType,  class BucketHasher = std::hash<KeyType>, class BucketType = Bucket<KeyType, ValueType>>
+    class BucketMap
+    {
+    public:
+        using Ptr = std::shared_ptr<BucketMap>;
+        using WriteAccessor = typename BucketType::WriteAccessor;
+        using ReadAccessor = typename BucketType::ReadAccessor;
+
+        BucketMap(size_t bucketSize)
+        {
+            for (size_t i = 0; i < bucketSize; i++)
+            {
+                m_buckets.push_back(std::make_shared<BucketType>());
+            }
+        }
+
+        virtual ~BucketMap(){};
+        // return true if found
+        template <class AccessorType>
+        bool find(typename AccessorType::Ptr& accessor, const KeyType& key)
+        {
+            auto idx = getBucketIndex(key);
+            auto bucket = m_buckets[idx];
+            BCOS_LOG(DEBUG) << LOG_KV("m_buckets size:", m_buckets.size()) << LOG_KV("idx:", idx);
+            return bucket->template find<AccessorType>(accessor, key);
+        }
+
+        // handler: accessor is nullptr if not found, handler return false to break to find
+        template <class AccessorType>
+        void batchFind(
+                const auto& keys, std::function<bool(const KeyType&, typename AccessorType::Ptr)> handler)
+        {
+            forEach<AccessorType>(keys, [handler = std::move(handler)](const KeyType& key,
+                                                                       typename BucketType::Ptr bucket,
+                                                                       typename AccessorType::Ptr accessor) {
+                bool has = bucket->template find<AccessorType>(accessor, key);
+                return handler(key, has ? accessor : nullptr);
+            });
+        }
+
+        void batchInsert(const auto& kvs,
+                         std::function<void(bool, const KeyType&, typename WriteAccessor::Ptr)> onInsert)
+        {
+            forEach<WriteAccessor>(kvs, [onInsert = std::move(onInsert)](decltype(kvs.front()) kv,
+                                                                         typename BucketType::Ptr bucket,
+                                                                         typename WriteAccessor::Ptr accessor) {
+                bucket->insert(accessor, kv);
+                return true;
+            });
+        }
+
+        void batchInsert(const auto& kvs)
+        {
+            batchInsert(kvs, [](bool, const KeyType&, typename WriteAccessor::Ptr) {});
+        }
+
+        void batchRemove(
+                const auto& keys, std::function<void(bool, const KeyType&, const ValueType&)> onRemove)
+        {
+            forEach<WriteAccessor>(keys, [onRemove = std::move(onRemove)](const KeyType& key,
+                                                                          typename BucketType::Ptr bucket,
+                                                                          typename WriteAccessor::Ptr accessor) {
+                auto [success, value] = bucket->remove(accessor, key);
+                onRemove(success, key, value);
+                return true;
+            });
+        }
+
+        void batchRemove(const auto& keys)
+        {
+            batchRemove(keys, [](bool, const KeyType&, const ValueType&) {});
+        }
+
+        bool insert(typename WriteAccessor::Ptr& accessor, std::pair<KeyType, ValueType> kv)
+        {
+            auto idx = getBucketIndex(kv.first);
+            auto bucket = m_buckets[idx];
+            return bucket->insert(accessor, std::move(kv));
+        }
+
+        ValueType remove(const KeyType& key)
+        {
+            auto idx = getBucketIndex(key);
+            auto bucket = m_buckets[idx];
+            return bucket->remove(key);
+        }
+
+        size_t size() const
+        {
+            size_t size = 0;
+            for (const auto& bucket : m_buckets)
+            {
+                size += bucket->size();
+            }
+            return size;
+        }
+
+        bool empty() const { return size() == 0; }
+
+        bool contains(const KeyType& key)
+        {
+            auto idx = getBucketIndex(key);
+            auto bucket = m_buckets[idx];
+            return bucket->contains(key);
+        }
+
+        void clear(std::function<void(bool, const KeyType&, const ValueType&)> onRemove = nullptr)
+        {
+            if (!onRemove) [[likely]]
+            {
+                for (size_t i = 0; i < m_buckets.size(); i++)
+                {
+                    m_buckets[i] = std::make_shared<BucketType>();
+                }
+            }
+            else
+            {
+                // idx and bucket
+                std::queue<std::pair<size_t, typename BucketType::Ptr>> bucket2Remove;
+                for (size_t i = 0; i < m_buckets.size(); i++)
+                {
+                    auto bucket = m_buckets[i];
+                    m_buckets[i] = std::make_shared<BucketType>();
+                    bucket2Remove.emplace(i, std::move(bucket));
+                }
+
+                while (!bucket2Remove.empty())
+                {
+                    auto it = std::move(bucket2Remove.front());
+                    auto idx = it.first;
+                    auto& bucket = it.second;
+                    bucket2Remove.pop();
+                    typename ReadAccessor::Ptr accessor;
+                    bool needWait = bucket2Remove.empty();  // wait if is last bucket
+                    bool acquired = bucket->acquireAccessor(accessor, needWait);
+                    if (acquired) [[likely]]
+                    {
+                        bucket->template forEach<ReadAccessor>(
+                                [&](typename ReadAccessor::Ptr accessor) {
+                                    onRemove(true, accessor->key(), accessor->value());
+                                    return true;
+                                },
+                                accessor);
+                    }
+                    else
+                    {
+                        bucket2Remove.template emplace(std::move(it));
+                    }
+                }
+            }
+        }
+
+        template <class AccessorType>  // handler return isContinue
+        void forEach(std::function<bool(typename AccessorType::Ptr)> handler)
+        {
+            forEach<AccessorType>(std::rand() % m_buckets.size(), std::move(handler));
+        }
+
+        template <class AccessorType>  // handler return isContinue
+        void forEach(const KeyType& startAfter, std::function<bool(typename AccessorType::Ptr)> handler)
+        {
+            size_t startIdx = (getBucketIndex(startAfter) + 1) % m_buckets.size();
+            forEach<AccessorType>(startIdx, std::move(handler));
+        }
+
+        template <class AccessorType>  // handler return isContinue
+        void forEach(size_t startIdx, std::function<bool(typename AccessorType::Ptr)> handler)
+        {
+            size_t x = startIdx;
+            size_t bucketsSize = m_buckets.size();
+
+            auto indexes =
+                    RANGES::iota_view<size_t, size_t>{startIdx, startIdx + bucketsSize} |
+                    RANGES::views::transform([bucketsSize](size_t i) { return i % bucketsSize; });
+
+            forEachBucket<AccessorType>(indexes,
+                                        [handler = std::move(handler)](size_t, typename BucketType::Ptr bucket,
+                                                                       typename AccessorType::Ptr accessor) {
+                                            return bucket->template forEach<AccessorType>(handler, accessor);
+                                        });
+        }
+
+        template <class AccessorType>  // handler return isContinue
+        void forEachBucket(const auto& bucketIndexes,
+                           std::function<bool(
+                                   size_t idx, typename BucketType::Ptr, typename AccessorType::Ptr)>
+                           handler)
         {
             // idx and bucket
-            std::queue<std::pair<size_t, typename Bucket<KeyType, ValueType>::Ptr>> bucket2Remove;
-            for (size_t i = 0; i < m_buckets.size(); i++)
+            std::queue<std::pair<size_t, typename BucketType::Ptr>> bucket2Process;
+
+            for (size_t idx : bucketIndexes)
             {
-                auto bucket = m_buckets[i];
-                m_buckets[i] = std::make_shared<Bucket<KeyType, ValueType>>();
-                bucket2Remove.emplace(i, std::move(bucket));
+                bucket2Process.template emplace(idx, m_buckets[idx]);
             }
 
-            while (!bucket2Remove.empty())
+            while (!bucket2Process.empty())
             {
-                auto it = std::move(bucket2Remove.front());
+                auto it = std::move(bucket2Process.front());
                 auto idx = it.first;
                 auto& bucket = it.second;
-                bucket2Remove.pop();
-                typename ReadAccessor::Ptr accessor;
-                bool needWait = bucket2Remove.empty();  // wait if is last bucket
+                bucket2Process.pop();
+                typename AccessorType::Ptr accessor;
+                bool needWait = bucket2Process.empty();  // wait if is last bucket
                 bool acquired = bucket->acquireAccessor(accessor, needWait);
                 if (acquired) [[likely]]
                 {
-                    bucket->template forEach<ReadAccessor>(
-                        [&](typename ReadAccessor::Ptr accessor) {
-                            onRemove(true, accessor->key(), accessor->value());
-                            return true;
-                        },
-                        accessor);
+                    if (!handler(idx, bucket, accessor))
+                    {
+                        break;
+                    }
                 }
                 else
                 {
-                    bucket2Remove.template emplace(std::move(it));
+                    bucket2Process.template emplace(std::move(it));
                 }
             }
         }
-    }
 
-    template <class AccessorType>  // handler return isContinue
-    void forEach(std::function<bool(typename AccessorType::Ptr)> handler)
-    {
-        forEach<AccessorType>(std::rand() % m_buckets.size(), std::move(handler));
-    }
-
-    template <class AccessorType>  // handler return isContinue
-    void forEach(const KeyType& startAfter, std::function<bool(typename AccessorType::Ptr)> handler)
-    {
-        size_t startIdx = (getBucketIndex(startAfter) + 1) % m_buckets.size();
-        forEach<AccessorType>(startIdx, std::move(handler));
-    }
-
-    template <class AccessorType>  // handler return isContinue
-    void forEach(size_t startIdx, std::function<bool(typename AccessorType::Ptr)> handler)
-    {
-        size_t x = startIdx;
-        size_t bucketsSize = m_buckets.size();
-
-        auto indexes =
-            RANGES::iota_view<size_t, size_t>{startIdx, startIdx + bucketsSize} |
-            RANGES::views::transform([bucketsSize](size_t i) { return i % bucketsSize; });
-
-        forEachBucket<AccessorType>(indexes,
-            [handler = std::move(handler)](size_t, typename Bucket<KeyType, ValueType>::Ptr bucket,
-                typename AccessorType::Ptr accessor) {
-                return bucket->template forEach<AccessorType>(handler, accessor);
+        template <class AccessorType>  // handler return isContinue
+        void forEach(const auto& objs,
+                     std::function<bool(decltype(objs.front()), typename BucketType::Ptr,
+                                        typename AccessorType::Ptr)>
+                     handler)
+        {
+            auto batches = objs | RANGES::views::chunk_by([this](const auto& a, const auto& b) {
+                return this->getBucketIndex(a) == this->getBucketIndex(b);
             });
-    }
 
-    template <class AccessorType>  // handler return isContinue
-    void forEachBucket(const auto& bucketIndexes,
-        std::function<bool(
-            size_t idx, typename Bucket<KeyType, ValueType>::Ptr, typename AccessorType::Ptr)>
-            handler)
-    {
-        // idx and bucket
-        std::queue<std::pair<size_t, typename Bucket<KeyType, ValueType>::Ptr>> bucket2Process;
+            std::queue<
+                    std::tuple<size_t, decltype(batches.front()), typename BucketType::Ptr>>
+                    bucket2Process;
 
-        for (size_t idx : bucketIndexes)
-        {
-            bucket2Process.template emplace(idx, m_buckets[idx]);
-        }
-
-        while (!bucket2Process.empty())
-        {
-            auto it = std::move(bucket2Process.front());
-            auto idx = it.first;
-            auto& bucket = it.second;
-            bucket2Process.pop();
-            typename AccessorType::Ptr accessor;
-            bool needWait = bucket2Process.empty();  // wait if is last bucket
-            bool acquired = bucket->acquireAccessor(accessor, needWait);
-            if (acquired) [[likely]]
+            for (const auto& batch : batches)
             {
-                if (!handler(idx, bucket, accessor))
+                typename AccessorType::Ptr accessor;
+                size_t idx = getBucketIndex(batch.front());
+                auto bucket = m_buckets[idx];
+                bool acquired = bucket->acquireAccessor(accessor, false);
+
+                if (acquired) [[likely]]
                 {
-                    break;
-                }
-            }
-            else
-            {
-                bucket2Process.template emplace(std::move(it));
-            }
-        }
-    }
-
-    template <class AccessorType>  // handler return isContinue
-    void forEach(const auto& objs,
-        std::function<bool(decltype(objs.front()), typename Bucket<KeyType, ValueType>::Ptr,
-            typename AccessorType::Ptr)>
-            handler)
-    {
-        auto batches = objs | RANGES::views::chunk_by([this](const auto& a, const auto& b) {
-            return this->getBucketIndex(a) == this->getBucketIndex(b);
-        });
-
-        std::queue<
-            std::tuple<size_t, decltype(batches.front()), typename Bucket<KeyType, ValueType>::Ptr>>
-            bucket2Process;
-
-        for (const auto& batch : batches)
-        {
-            typename AccessorType::Ptr accessor;
-            size_t idx = getBucketIndex(batch.front());
-            auto bucket = m_buckets[idx];
-            bool acquired = bucket->acquireAccessor(accessor, false);
-
-            if (acquired) [[likely]]
-            {
-                for (const auto& obj : batch)
-                {
-                    if (!handler(obj, bucket, accessor))
+                    for (const auto& obj : batch)
                     {
-                        return;
+                        if (!handler(obj, bucket, accessor))
+                        {
+                            return;
+                        }
                     }
                 }
-            }
-            else
-            {
-                bucket2Process.template emplace(idx, batch, bucket);
-            }
-        }
-
-        while (!bucket2Process.empty())
-        {
-            auto it = std::move(bucket2Process.front());
-            auto idx = std::get<0>(it);
-            const auto& batch = std::get<1>(it);
-            auto& bucket = std::get<2>(it);
-            bucket2Process.pop();
-
-            typename AccessorType::Ptr accessor;
-            bool needWait = bucket2Process.empty();  // wait if is last bucket
-            bool acquired = bucket->acquireAccessor(accessor, bucket2Process.empty());
-
-            if (acquired) [[likely]]
-            {
-                for (const auto& obj : batch)
+                else
                 {
-                    if (!handler(obj, bucket, accessor))
-                    {
-                        return;
-                    }
+                    bucket2Process.template emplace(idx, batch, bucket);
                 }
             }
-            else
+
+            while (!bucket2Process.empty())
             {
-                bucket2Process.template emplace(std::move(it));
+                auto it = std::move(bucket2Process.front());
+                auto idx = std::get<0>(it);
+                const auto& batch = std::get<1>(it);
+                auto& bucket = std::get<2>(it);
+                bucket2Process.pop();
+
+                typename AccessorType::Ptr accessor;
+                bool needWait = bucket2Process.empty();  // wait if is last bucket
+                bool acquired = bucket->acquireAccessor(accessor, bucket2Process.empty());
+
+                if (acquired) [[likely]]
+                {
+                    for (const auto& obj : batch)
+                    {
+                        if (!handler(obj, bucket, accessor))
+                        {
+                            return;
+                        }
+                    }
+                }
+                else
+                {
+                    bucket2Process.template emplace(std::move(it));
+                }
             }
         }
-    }
 
-protected:
-    size_t getBucketIndex(const std::pair<const KeyType&, const ValueType&>& kv)
+    protected:
+        size_t getBucketIndex(const std::pair<const KeyType&, const ValueType&>& kv)
+        {
+            return getBucketIndex(kv.first);
+        }
+
+        size_t getBucketIndex(const KeyType& key)
+        {
+            auto hash = BucketHasher{}(key);
+            return hash % m_buckets.size();
+        }
+
+        tbb::concurrent_vector<typename BucketType::Ptr> m_buckets;
+    };
+
+    template <class KeyType, class BucketHasher = std::hash<KeyType>>
+    class BucketSet : public BucketMap<KeyType, EmptyType, BucketHasher>
     {
-        return getBucketIndex(kv.first);
-    }
+    public:
+        BucketSet(size_t bucketSize) : BucketMap<KeyType, EmptyType, BucketHasher>(bucketSize){};
+        ~BucketSet() override = default;
 
-    size_t getBucketIndex(const KeyType& key)
-    {
-        auto hash = BucketHasher{}(key);
-        return hash % m_buckets.size();
-    }
+        using WriteAccessor = typename BucketMap<KeyType, EmptyType, BucketHasher>::WriteAccessor;
+        using ReadAccessor = typename BucketMap<KeyType, EmptyType, BucketHasher>::ReadAccessor;
 
-    tbb::concurrent_vector<typename Bucket<KeyType, ValueType>::Ptr> m_buckets;
-};
+        bool insert(typename BucketSet::WriteAccessor::Ptr& accessor, KeyType key)
+        {
+            return BucketMap<KeyType, EmptyType, BucketHasher>::insert(
+                    accessor, {std::move(key), EmptyType()});
+        }
 
-template <class KeyType, class BucketHasher = std::hash<KeyType>>
-class BucketSet : public BucketMap<KeyType, EmptyType, BucketHasher>
-{
-public:
-    BucketSet(size_t bucketSize) : BucketMap<KeyType, EmptyType, BucketHasher>(bucketSize){};
-    ~BucketSet() override = default;
+        void batchInsert(const auto& keys,
+                         std::function<void(bool, const KeyType&, typename BucketSet::WriteAccessor::Ptr)> onInsert)
+        {
+            BucketSet::template forEach<typename BucketSet::WriteAccessor>(
+                    keys, [onInsert = std::move(onInsert)](const KeyType& key,
+                                                           typename Bucket<KeyType, EmptyType>::Ptr bucket,
+                                                           typename BucketSet::WriteAccessor::Ptr accessor) {
+                        bool success = bucket->insert(accessor, {key, EmptyType()});
+                        onInsert(success, key, success ? accessor : nullptr);
+                        return true;
+                    });
+        }
 
-    using WriteAccessor = typename BucketMap<KeyType, EmptyType, BucketHasher>::WriteAccessor;
-    using ReadAccessor = typename BucketMap<KeyType, EmptyType, BucketHasher>::ReadAccessor;
-
-    bool insert(typename BucketSet::WriteAccessor::Ptr& accessor, KeyType key)
-    {
-        return BucketMap<KeyType, EmptyType, BucketHasher>::insert(
-            accessor, {std::move(key), EmptyType()});
-    }
-
-    void batchInsert(const auto& keys,
-        std::function<void(bool, const KeyType&, typename BucketSet::WriteAccessor::Ptr)> onInsert)
-    {
-        BucketSet::template forEach<typename BucketSet::WriteAccessor>(
-            keys, [onInsert = std::move(onInsert)](const KeyType& key,
-                      typename Bucket<KeyType, EmptyType>::Ptr bucket,
-                      typename BucketSet::WriteAccessor::Ptr accessor) {
-                bool success = bucket->insert(accessor, {key, EmptyType()});
-                onInsert(success, key, success ? accessor : nullptr);
-                return true;
-            });
-    }
-
-    void batchInsert(const auto& keys)
-    {
-        batchInsert(keys, [](bool, const KeyType&, typename BucketSet::WriteAccessor::Ptr) {});
-    }
-};
+        void batchInsert(const auto& keys)
+        {
+            batchInsert(keys, [](bool, const KeyType&, typename BucketSet::WriteAccessor::Ptr) {});
+        }
+    };
 
 }  // namespace bcos
