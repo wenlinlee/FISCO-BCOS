@@ -45,23 +45,30 @@ public:
     {
     public:
         IteratorImpl(typename Container::nth_index<0>::type::iterator& it)
-                : first(it->txHash), second(it->transaction), m_iterator(it)
+          : first(it->txHash), second(it->transaction), m_iterator(it)
         {}
 
-        IteratorImpl(const bcos::crypto::HashType& _first, const bcos::protocol::Transaction::Ptr& _transaction)
-                : first(_first), second(_transaction), m_iterator()
+        IteratorImpl(const bcos::crypto::HashType& _first,
+            const bcos::protocol::Transaction::Ptr& _transaction)
+          : first(_first), second(_transaction), m_iterator()
         {}
 
-        friend bool operator==(const std::shared_ptr<IteratorImpl>& lhs, const std::shared_ptr<IteratorImpl>& rhs) {
-            if (lhs && rhs) {
+        //        IteratorImpl(const bcos::crypto::HashType& _first, const
+        //        bcos::protocol::Transaction::Ptr& _transaction)
+        //                : first(_first), second(_transaction), m_iterator()
+        //        {}
+
+        friend bool operator==(
+            const std::shared_ptr<IteratorImpl>& lhs, const std::shared_ptr<IteratorImpl>& rhs)
+        {
+            if (lhs && rhs)
+            {
                 return *lhs == *rhs;
             }
-            return lhs.get() == rhs.get();
+            return lhs == rhs;
         }
 
-        bool operator==(const IteratorImpl& other) const {
-            return m_iterator == other.m_iterator && first == other.first && second == other.second;
-        }
+        bool operator==(const IteratorImpl& other) const { return m_iterator == other.m_iterator; }
 
         Container::nth_index<0>::type::iterator getIterator() const { return m_iterator; }
 
@@ -105,9 +112,7 @@ public:
     {
         MyStruct newData(key, value);
         auto result = multiIndexMap.insert(newData);
-        auto txhash = result.first->txHash;
-        auto it = multiIndexMap.get<0>().find(txhash);
-        return {std::make_shared<IteratorImpl>(it), result.second};
+        return {std::make_shared<IteratorImpl>(result.first), result.second};
     }
 
     bool contains(const bcos::crypto::HashType& key){

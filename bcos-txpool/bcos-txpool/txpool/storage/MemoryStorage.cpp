@@ -26,8 +26,11 @@
 #include <boost/exception/diagnostic_information.hpp>
 #include <boost/throw_exception.hpp>
 #include <memory>
+#include <thread>
 #include <tuple>
 #include <variant>
+
+#define CPU_CORES std::thread::hardware_concurrency()
 
 using namespace bcos;
 using namespace bcos::txpool;
@@ -40,7 +43,7 @@ struct SubmitTransactionError : public bcos::error::Exception
 MemoryStorage::MemoryStorage(
     TxPoolConfig::Ptr _config, size_t _notifyWorkerNum, uint64_t _txsExpirationTime)
   : m_config(std::move(_config)),
-    m_txsTable(256),
+    m_txsTable(64),
     m_invalidTxs(256),
     m_missedTxs(32),
     m_txsExpirationTime(_txsExpirationTime),
@@ -81,6 +84,7 @@ task::Task<protocol::TransactionSubmitResult::Ptr> MemoryStorage::submitTransact
     protocol::Transaction::Ptr transaction)
 {
     transaction->setImportTime(utcTime());
+    //    TXPOOL_LOG(DEBUG) << LOG_KV("#### importTime", transaction->importTime());
     struct Awaitable
     {
         [[maybe_unused]] constexpr bool await_ready() { return false; }
@@ -141,8 +145,9 @@ task::Task<protocol::TransactionSubmitResult::Ptr> MemoryStorage::submitTransact
             m_submitResult;
     };
 
-    Awaitable awaitable{
-        .m_transaction = transaction, .m_self = shared_from_this(), .m_submitResult = {}};
+    Awaitable awaitable{.m_transaction = std::move(transaction),
+        .m_self = shared_from_this(),
+        .m_submitResult = {}};
     co_return co_await awaitable;
 }
 
@@ -274,6 +279,7 @@ TransactionStatus MemoryStorage::verifyAndSubmitTransaction(
     Transaction::Ptr transaction, TxSubmitCallback txSubmitCallback, bool checkPoolLimit, bool lock)
 {
     size_t txsSize = m_txsTable.size();
+    TXPOOL_LOG(DEBUG) << LOG_KV("txsSize", txsSize);
 
     auto result = txpoolStorageCheck(*transaction);
     if (result != TransactionStatus::None)
@@ -608,6 +614,10 @@ ConstTransactionsPtr MemoryStorage::fetchNewTxs(size_t _txsLimit)
 void MemoryStorage::batchFetchTxs(Block::Ptr _txsList, Block::Ptr _sysTxsList, size_t _txsLimit,
     TxsHashSetPtr _avoidTxs, bool _avoidDuplicate)
 {
+    if (_txsLimit > 100)
+    {
+        _txsLimit = 100;
+    }
     TXPOOL_LOG(INFO) << LOG_DESC("begin batchFetchTxs") << LOG_KV("pendingTxs", m_txsTable.size())
                      << LOG_KV("limit", _txsLimit);
     auto blockFactory = m_config->blockFactory();
@@ -710,22 +720,35 @@ void MemoryStorage::batchFetchTxs(Block::Ptr _txsList, Block::Ptr _sysTxsList, s
 
     if (_avoidDuplicate)
     {
-        m_txsTable.forEach<TxsMap::ReadAccessor>(
-            m_knownLatestSealedTxHash, [&](TxsMap::ReadAccessor::Ptr accessor) {
+        auto _eachBucketTxsLimit = _txsLimit / 64;
+        TXPOOL_LOG(INFO) << LOG_DESC("batchFetchTxs") << LOG_KV("pendingTxs", m_txsTable.size())
+                         << LOG_KV("limit", _txsLimit)
+                         << LOG_KV("eachBucketTxsLimit", _eachBucketTxsLimit);
+        m_txsTable.forEach<TxsMap::ReadAccessor>(m_knownLatestSealedTxHash, _eachBucketTxsLimit,
+            _txsLimit, [&](TxsMap::ReadAccessor::Ptr accessor) {
                 const auto& tx = accessor->value();
                 handleTx(tx);
-                return (_txsList->transactionsMetaDataSize() +
-                           _sysTxsList->transactionsMetaDataSize()) < _txsLimit;
+                return true;
             });
     }
     else
     {
-        m_txsTable.forEach<TxsMap::ReadAccessor>([&](TxsMap::ReadAccessor::Ptr accessor) {
+        auto _eachBucketTxsLimit = _txsLimit / 3;
+        TXPOOL_LOG(INFO) << LOG_DESC("batchFetchTxs") << LOG_KV("pendingTxs", m_txsTable.size())
+                         << LOG_KV("limit", _txsLimit)
+                         << LOG_KV("eachBucketTxsLimit", _eachBucketTxsLimit);
+        m_txsTable.forEach<TxsMap::ReadAccessor>(
+            _eachBucketTxsLimit, _txsLimit, [&](TxsMap::ReadAccessor::Ptr accessor) {
+                const auto& tx = accessor->value();
+                handleTx(tx);
+                return true;
+            });
+        /*m_txsTable.forEach<TxsMap::ReadAccessor>([&](TxsMap::ReadAccessor::Ptr accessor) {
             const auto& tx = accessor->value();
             handleTx(tx);
             return (_txsList->transactionsMetaDataSize() +
                        _sysTxsList->transactionsMetaDataSize()) < _txsLimit;
-        });
+        });*/
     }
     auto invalidTxsSize = m_invalidTxs.size();
     notifyUnsealedTxsSize();
@@ -973,18 +996,15 @@ size_t MemoryStorage::unSealedTxsSize()
 size_t MemoryStorage::unSealedTxsSizeWithoutLock()
 {
     auto txsSize = m_txsTable.size();
-    // FIXME: the below log should be debug level
+    TXPOOL_LOG(DEBUG) << LOG_DESC("unSealedTxsSize") << LOG_KV("txsSize", txsSize)
+                      << LOG_KV("sealedTxsSize", m_sealedTxsSize);
 
-    // TXPOOL_LOG(INFO) << LOG_DESC("unSealedTxsSize") << LOG_KV("txsSize", txsSize)
-    //                  << LOG_KV("sealedTxsSize", m_sealedTxsSize);
-
-    // if (txsSize < m_sealedTxsSize)
-    // {
-    //     m_sealedTxsSize = txsSize;
-    //     return 0;
-    // }
-    // return (txsSize - m_sealedTxsSize);
-    return txsSize;
+    if (txsSize < m_sealedTxsSize)
+    {
+        m_sealedTxsSize = txsSize;
+        return 0;
+    }
+    return (txsSize - m_sealedTxsSize);
 }
 
 void MemoryStorage::notifyUnsealedTxsSize(size_t _retryTime)
@@ -1036,12 +1056,31 @@ std::shared_ptr<HashList> MemoryStorage::batchVerifyProposal(Block::Ptr _block)
     auto txHashes =
         RANGES::iota_view<size_t, size_t>{0, txsSize} |
         RANGES::views::transform([&_block](size_t i) { return _block->transactionHash(i); });
+    bool findErrorTxInBlock = false;
 
     m_txsTable.batchFind<TxsMap::ReadAccessor>(
-        txHashes, [&missedTxs](const auto& txHash, TxsMap::ReadAccessor::Ptr accessor) {
+        txHashes, [&missedTxs, &findErrorTxInBlock, _block](
+                      const auto& txHash, TxsMap::ReadAccessor::Ptr accessor) {
             if (!accessor)
             {
                 missedTxs->emplace_back(txHash);
+            }
+            else if (accessor->value()->sealed())
+            {
+                auto header = _block->blockHeader();
+                if ((accessor->value()->batchId() != header->number() &&
+                        accessor->value()->batchId() != -1) ||
+                    accessor->value()->batchHash() != header->hash())
+                {
+                    TXPOOL_LOG(INFO)
+                        << LOG_DESC("batchVerifyProposal unexpected wrong tx")
+                        << LOG_KV("blkNum", header->number())
+                        << LOG_KV("blkHash", header->hash().abridged())
+                        << LOG_KV("txBatchId", accessor->value()->batchId())
+                        << LOG_KV("txBatchHash", accessor->value()->batchHash().abridged());
+                    findErrorTxInBlock = true;
+                    return false;
+                }
             }
             return true;
         });
@@ -1050,7 +1089,7 @@ std::shared_ptr<HashList> MemoryStorage::batchVerifyProposal(Block::Ptr _block)
                      << LOG_KV("hash", batchHash.abridged()) << LOG_KV("txsSize", txsSize)
                      << LOG_KV("lockT", lockT) << LOG_KV("verifyT", (utcTime() - startT))
                      << LOG_KV("missedTxs", missedTxs->size());
-    return missedTxs;
+    return findErrorTxInBlock ? nullptr : missedTxs;
 }
 
 bool MemoryStorage::batchVerifyProposal(std::shared_ptr<HashList> _txsHashList)
