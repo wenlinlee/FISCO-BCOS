@@ -30,6 +30,7 @@
 #include <tuple>
 #include <variant>
 
+// FIXME: use it
 #define CPU_CORES std::thread::hardware_concurrency()
 
 using namespace bcos;
@@ -43,9 +44,9 @@ struct SubmitTransactionError : public bcos::error::Exception
 MemoryStorage::MemoryStorage(
     TxPoolConfig::Ptr _config, size_t _notifyWorkerNum, uint64_t _txsExpirationTime)
   : m_config(std::move(_config)),
-    m_txsTable(64),
-    m_invalidTxs(256),
-    m_missedTxs(32),
+    m_txsTable(8 * CPU_CORES),
+    m_invalidTxs(8 * CPU_CORES),
+    m_missedTxs(CPU_CORES),
     m_txsExpirationTime(_txsExpirationTime),
     m_inRateCollector("tx_pool_in", 1000),
     m_sealRateCollector("tx_pool_seal", 1000),
@@ -61,7 +62,8 @@ MemoryStorage::MemoryStorage(
     TXPOOL_LOG(INFO) << LOG_DESC("init MemoryStorage of txpool")
                      << LOG_KV("txNotifierWorkerNum", _notifyWorkerNum)
                      << LOG_KV("txsExpirationTime", m_txsExpirationTime)
-                     << LOG_KV("poolLimit", m_config->poolLimit());
+                     << LOG_KV("poolLimit", m_config->poolLimit())
+                     << LOG_KV("CPU_CORES", CPU_CORES);
 }
 
 void MemoryStorage::start()
@@ -84,7 +86,6 @@ task::Task<protocol::TransactionSubmitResult::Ptr> MemoryStorage::submitTransact
     protocol::Transaction::Ptr transaction)
 {
     transaction->setImportTime(utcTime());
-    //    TXPOOL_LOG(DEBUG) << LOG_KV("#### importTime", transaction->importTime());
     struct Awaitable
     {
         [[maybe_unused]] constexpr bool await_ready() { return false; }
@@ -279,7 +280,6 @@ TransactionStatus MemoryStorage::verifyAndSubmitTransaction(
     Transaction::Ptr transaction, TxSubmitCallback txSubmitCallback, bool checkPoolLimit, bool lock)
 {
     size_t txsSize = m_txsTable.size();
-    TXPOOL_LOG(DEBUG) << LOG_KV("txsSize", txsSize);
 
     auto result = txpoolStorageCheck(*transaction);
     if (result != TransactionStatus::None)
@@ -349,6 +349,8 @@ TransactionStatus MemoryStorage::insertWithoutLock(Transaction::Ptr transaction)
     {
         TxsMap::WriteAccessor::Ptr accessor;
         auto inserted = m_txsTable.insert(accessor, {transaction->hash(), transaction});
+        TXPOOL_LOG(DEBUG) << LOG_KV("insert", inserted) << LOG_KV("tx", transaction->hash())
+                          << LOG_KV("bucket index", m_txsTable.getBucketIndex(transaction->hash()));
         if (!inserted)
         {
             return TransactionStatus::AlreadyInTxPool;
@@ -614,10 +616,6 @@ ConstTransactionsPtr MemoryStorage::fetchNewTxs(size_t _txsLimit)
 void MemoryStorage::batchFetchTxs(Block::Ptr _txsList, Block::Ptr _sysTxsList, size_t _txsLimit,
     TxsHashSetPtr _avoidTxs, bool _avoidDuplicate)
 {
-    if (_txsLimit > 100)
-    {
-        _txsLimit = 100;
-    }
     TXPOOL_LOG(INFO) << LOG_DESC("begin batchFetchTxs") << LOG_KV("pendingTxs", m_txsTable.size())
                      << LOG_KV("limit", _txsLimit);
     auto blockFactory = m_config->blockFactory();
@@ -720,11 +718,31 @@ void MemoryStorage::batchFetchTxs(Block::Ptr _txsList, Block::Ptr _sysTxsList, s
 
     if (_avoidDuplicate)
     {
-        auto _eachBucketTxsLimit = _txsLimit / 64;
-        TXPOOL_LOG(INFO) << LOG_DESC("batchFetchTxs") << LOG_KV("pendingTxs", m_txsTable.size())
-                         << LOG_KV("limit", _txsLimit)
-                         << LOG_KV("eachBucketTxsLimit", _eachBucketTxsLimit);
-        m_txsTable.forEach<TxsMap::ReadAccessor>(m_knownLatestSealedTxHash, _eachBucketTxsLimit,
+        size_t eachBucketTxsLimit = 0;
+        //        uint64_t eachBucketTimeLimit = 500 / (CPU_CORES * 8);
+        //        TXPOOL_LOG(INFO) << LOG_DESC("batchFetchTxs") << LOG_KV("pendingTxs",
+        //        m_txsTable.size())
+        //                          << LOG_KV("limit", _txsLimit)
+        //                          << LOG_KV("eachBucketTimeLimit", eachBucketTimeLimit);
+        //        m_txsTable.forEach<TxsMap::ReadAccessor>(m_knownLatestSealedTxHash,
+        //        eachBucketTimeLimit, _txsLimit,
+        //            [&](TxsMap::ReadAccessor::Ptr accessor) {
+        //                const auto& tx = accessor->value();
+        //                handleTx(tx);
+        //                return true;
+        //            });
+        if (_txsLimit / 8 * CPU_CORES == 0 || m_txsTable.size() < _txsLimit)
+        {
+            eachBucketTxsLimit = _txsLimit;
+        }
+        else
+        {
+            eachBucketTxsLimit = _txsLimit / 8 * CPU_CORES;
+        }
+        TXPOOL_LOG(TRACE) << LOG_DESC("batchFetchTxs") << LOG_KV("pendingTxs", m_txsTable.size())
+                          << LOG_KV("limit", _txsLimit)
+                          << LOG_KV("eachBucketTxsLimit", eachBucketTxsLimit);
+        m_txsTable.forEach<TxsMap::ReadAccessor>(m_knownLatestSealedTxHash, eachBucketTxsLimit,
             _txsLimit, [&](TxsMap::ReadAccessor::Ptr accessor) {
                 const auto& tx = accessor->value();
                 handleTx(tx);
@@ -733,22 +751,31 @@ void MemoryStorage::batchFetchTxs(Block::Ptr _txsList, Block::Ptr _sysTxsList, s
     }
     else
     {
-        auto _eachBucketTxsLimit = _txsLimit / 3;
+        //        uint64_t eachBucketTimeLimit = 500 / (CPU_CORES * 8);
+        //        m_txsTable.forEach<TxsMap::ReadAccessor>(eachBucketTimeLimit, _txsLimit,
+        //            [&](TxsMap::ReadAccessor::Ptr accessor) {
+        //                const auto& tx = accessor->value();
+        //                handleTx(tx);
+        //                return true;
+        //            });
+        size_t eachBucketTxsLimit = 0;
+        if (_txsLimit / 8 * CPU_CORES == 0 || m_txsTable.size() < _txsLimit)
+        {
+            eachBucketTxsLimit = _txsLimit;
+        }
+        else
+        {
+            eachBucketTxsLimit = _txsLimit / 8 * CPU_CORES;
+        }
         TXPOOL_LOG(INFO) << LOG_DESC("batchFetchTxs") << LOG_KV("pendingTxs", m_txsTable.size())
                          << LOG_KV("limit", _txsLimit)
-                         << LOG_KV("eachBucketTxsLimit", _eachBucketTxsLimit);
+                         << LOG_KV("eachBucketTxsLimit", eachBucketTxsLimit);
         m_txsTable.forEach<TxsMap::ReadAccessor>(
-            _eachBucketTxsLimit, _txsLimit, [&](TxsMap::ReadAccessor::Ptr accessor) {
+            eachBucketTxsLimit, _txsLimit, [&](TxsMap::ReadAccessor::Ptr accessor) {
                 const auto& tx = accessor->value();
                 handleTx(tx);
                 return true;
             });
-        /*m_txsTable.forEach<TxsMap::ReadAccessor>([&](TxsMap::ReadAccessor::Ptr accessor) {
-            const auto& tx = accessor->value();
-            handleTx(tx);
-            return (_txsList->transactionsMetaDataSize() +
-                       _sysTxsList->transactionsMetaDataSize()) < _txsLimit;
-        });*/
     }
     auto invalidTxsSize = m_invalidTxs.size();
     notifyUnsealedTxsSize();
