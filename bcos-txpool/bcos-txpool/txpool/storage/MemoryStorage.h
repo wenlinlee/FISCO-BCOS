@@ -126,6 +126,14 @@ protected:
         bcos::protocol::Transaction::Ptr transaction);
     bcos::protocol::TransactionStatus enforceSubmitTransaction(
         bcos::protocol::Transaction::Ptr _tx);
+
+    void setBroadcastTransactionHandler(
+        std::function<void(protocol::Transaction::Ptr)> _handler) override
+    {
+        m_broadcastTransactionHandler = std::move(_handler);
+    }
+    bcos::protocol::TransactionStatus dupCreateTransaction(protocol::Transaction::Ptr transaction,
+        protocol::TxSubmitCallback txSubmitCallback, bool checkPoolLimit, bool lock);
     bcos::protocol::TransactionStatus verifyAndSubmitTransaction(
         protocol::Transaction::Ptr transaction, protocol::TxSubmitCallback txSubmitCallback,
         bool checkPoolLimit, bool lock);
@@ -183,7 +191,7 @@ protected:
     RateCollector m_inRateCollector;
     RateCollector m_sealRateCollector;
     RateCollector m_removeRateCollector;
-
+    std::function<void(protocol::Transaction::Ptr)> m_broadcastTransactionHandler;
     bcos::crypto::HashType m_knownLatestSealedTxHash;
 };
 }  // namespace bcos::txpool

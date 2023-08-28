@@ -93,7 +93,7 @@ task::Task<protocol::TransactionSubmitResult::Ptr> MemoryStorage::submitTransact
         {
             try
             {
-                auto result = m_self->verifyAndSubmitTransaction(
+                auto result = m_self->dupCreateTransaction(
                     std::move(m_transaction),
                     [this, m_handle = handle](Error::Ptr error,
                         bcos::protocol::TransactionSubmitResult::Ptr result) mutable {
@@ -274,6 +274,43 @@ TransactionStatus MemoryStorage::enforceSubmitTransaction(Transaction::Ptr _tx)
         m_sealedTxsSize++;
     }
     return TransactionStatus::None;
+}
+
+TransactionStatus MemoryStorage::dupCreateTransaction(protocol::Transaction::Ptr transaction,
+    TxSubmitCallback txSubmitCallback, bool checkPoolLimit, bool lock)
+{
+    if (txSubmitCallback != nullptr)
+    {
+        int32_t version = transaction->version();
+        const std::string to = std::string(transaction->to());
+        const bytes input = transaction->input().toBytes();
+        auto seedBlockLimit = transaction->blockLimit();
+        const std::string chainId = std::string(transaction->chainId());
+        const std::string groupId = std::string(transaction->groupId());
+        int64_t num = 10;
+        std::atomic<int64_t> sentNum = 0;
+
+        do
+        {
+            const u256 nonce = u256(transaction->nonce()) + utcTimeUs();
+            int64_t blockLimit = seedBlockLimit + sentNum.fetch_add(1) / 10000;
+
+            int64_t importTime = utcTime();
+            Transaction::Ptr tx = m_config->txFactory()->createTransaction(
+                version, to, input, nonce.str(), blockLimit, chainId, groupId, importTime);
+
+            m_broadcastTransactionHandler(tx);
+            verifyAndSubmitTransaction(tx, nullptr, checkPoolLimit, lock);
+
+        } while (num > sentNum);
+        return verifyAndSubmitTransaction(
+            transaction, std::move(txSubmitCallback), checkPoolLimit, lock);
+    }
+    else
+    {
+        return verifyAndSubmitTransaction(
+            transaction, std::move(txSubmitCallback), checkPoolLimit, lock);
+    }
 }
 
 TransactionStatus MemoryStorage::verifyAndSubmitTransaction(

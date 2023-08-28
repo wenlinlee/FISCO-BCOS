@@ -19,6 +19,7 @@
  * @date 2021-05-10
  */
 #include "TxPool.h"
+#include "bcos-txpool/bcos-txpool/txpool/storage/MemoryStorage.h"
 #include "bcos-utilities/Error.h"
 #include "txpool/validator/LedgerNonceChecker.h"
 #include "txpool/validator/TxValidator.h"
@@ -52,6 +53,9 @@ bcos::txpool::TxPool::TxPool(TxPoolConfig::Ptr config, TxPoolStorageInterface::P
     // worker to pre-store-txs
     m_txsPreStore = std::make_shared<ThreadPool>("txsPreStore", 1);
     TXPOOL_LOG(INFO) << LOG_DESC("create TxPool") << LOG_KV("submitterNum", verifierWorkerNum);
+    m_txpoolStorage->setBroadcastTransactionHandler([this](protocol::Transaction::Ptr transaction) {
+        [[maybe_unused]] auto result = broadcastTransaction(*transaction);
+    });
 }
 
 bcos::txpool::TxPool::~TxPool() noexcept

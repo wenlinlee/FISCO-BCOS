@@ -113,6 +113,10 @@ public:
     {
         m_txsCleanUpSwitch = std::move(_txsCleanUpSwitch);
     }
+    virtual void setBroadcastTransactionHandler(
+        std::function<void(protocol::Transaction::Ptr)> handler)
+    {}
+
 
 protected:
     bcos::CallbackCollectionHandler<> m_onReady;
@@ -120,5 +124,6 @@ protected:
     std::function<void(size_t, std::function<void(Error::Ptr)>)> m_unsealedTxsNotifier;
     // Determine to periodically clean up expired transactions or not
     std::function<bool()> m_txsCleanUpSwitch;
+    std::function<void(protocol::Transaction::Ptr)> m_broadcastTransactionHandler;
 };
 }  // namespace bcos::txpool

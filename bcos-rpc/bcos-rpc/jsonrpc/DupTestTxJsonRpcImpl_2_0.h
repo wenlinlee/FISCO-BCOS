@@ -2,7 +2,6 @@
 // Created by Jimmy Shi on 2022/6/11.
 //
 #pragma once
-#include "DuplicateTransactionFactory.h"
 #include "JsonRpcImpl_2_0.h"
 #include <bcos-task/Wait.h>
 #include <bcos-utilities/Overloaded.h>
