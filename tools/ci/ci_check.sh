@@ -165,6 +165,8 @@ check_vrf_rpbft()
 
 fisco_version=$(../bin/fisco-bcos -v | grep -o "2\.[0-9]\.[0-9]" | head -n 1)
 if [ -z "${fisco_version}" ];then LOG_ERROR "get fisco_version failed" && ../bin/fisco-bcos -v ;fi
+LOG_INFO "------ java version-------"
+java -version
 init
 check_sync_consensus
 check_binarylog
