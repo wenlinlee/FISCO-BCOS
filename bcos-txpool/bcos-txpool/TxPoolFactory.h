@@ -38,7 +38,8 @@ public:
 
     virtual ~TxPoolFactory() = default;
     TxPool::Ptr createTxPool(size_t _notifyWorkerNum = 2, size_t _verifierWorkerNum = 4,
-        uint64_t _txsExpirationTime = TX_DEFAULT_EXPIRATION_TIME);
+        uint64_t _txsExpirationTime = TX_DEFAULT_EXPIRATION_TIME,
+        bool _packingChronologically = false);
 
 private:
     bcos::crypto::NodeIDPtr m_nodeId;

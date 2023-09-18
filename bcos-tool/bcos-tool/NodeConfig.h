@@ -103,6 +103,7 @@ public:
     size_t notifyWorkerNum() const { return m_notifyWorkerNum; }
     size_t verifierWorkerNum() const { return m_verifierWorkerNum; }
     int64_t txsExpirationTime() const { return m_txsExpirationTime; }
+    bool packChronologically() const { return m_packChronologically; }
 
     bool smCryptoType() const { return m_smCryptoType; }
     std::string const& chainId() const { return m_chainId; }
@@ -312,6 +313,7 @@ private:
     size_t m_notifyWorkerNum;
     size_t m_verifierWorkerNum;
     int64_t m_txsExpirationTime;
+    bool m_packChronologically = false;
     // TODO: the block sync module need some configurations?
 
     // chain configuration

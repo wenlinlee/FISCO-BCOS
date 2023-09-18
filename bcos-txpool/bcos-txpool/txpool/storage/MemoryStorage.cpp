@@ -20,6 +20,7 @@
  */
 #include "bcos-txpool/txpool/storage/MemoryStorage.h"
 #include "bcos-utilities/Common.h"
+#include <bcos-utilities/BucketMap.h>
 #include <oneapi/tbb/blocked_range.h>
 #include <oneapi/tbb/parallel_for_each.h>
 #include <tbb/parallel_for.h>
@@ -39,13 +40,14 @@ using namespace bcos::txpool;
 using namespace bcos::crypto;
 using namespace bcos::protocol;
 
-MemoryStorage::MemoryStorage(
-    TxPoolConfig::Ptr _config, size_t _notifyWorkerNum, uint64_t _txsExpirationTime)
+MemoryStorage::MemoryStorage(TxPoolConfig::Ptr _config, size_t _notifyWorkerNum,
+    uint64_t _txsExpirationTime, bool _packingChronologically)
   : m_config(std::move(_config)),
     m_txsTable(BUCKET_SIZE),
     m_invalidTxs(BUCKET_SIZE),
     m_missedTxs(CPU_CORES),
     m_txsExpirationTime(_txsExpirationTime),
+    m_packingChronologically(_packingChronologically),
     m_inRateCollector("tx_pool_in", 1000),
     m_sealRateCollector("tx_pool_seal", 1000),
     m_removeRateCollector("tx_pool_rm", 1000)
@@ -53,7 +55,7 @@ MemoryStorage::MemoryStorage(
     m_blockNumberUpdatedTime = utcTime();
     // Trigger a transaction cleanup operation every 3s
     m_cleanUpTimer = std::make_shared<Timer>(TXPOOL_CLEANUP_TIME, "txpoolTimer");
-    m_cleanUpTimer->registerTimeoutHandler([this] { cleanUpExpiredTransactions(); });
+    m_cleanUpTimer->registerTimeoutHandler([this] { cleanUpExpiredTransactions(); });]['']
     TXPOOL_LOG(INFO) << LOG_DESC("init MemoryStorage of txpool")
                      << LOG_KV("txNotifierWorkerNum", _notifyWorkerNum)
                      << LOG_KV("txsExpirationTime", m_txsExpirationTime)
@@ -781,29 +783,44 @@ void MemoryStorage::batchFetchTxs(Block::Ptr _txsList, Block::Ptr _sysTxsList, s
 
     if (_avoidDuplicate)
     {
-        size_t eachBucketTxsLimit = 0;
-        if (_txsLimit < BUCKET_SIZE || m_txsTable.size() < _txsLimit)
+        // If the m_packingChronologically is true, then the pool packs the txs in chronological
+        // order
+        if (m_packingChronologically)
         {
-            eachBucketTxsLimit = _txsLimit;
+            size_t eachBucketTxsLimit = 0;
+            if (_txsLimit < BUCKET_SIZE || m_txsTable.size() < _txsLimit)
+            {
+                eachBucketTxsLimit = _txsLimit;
+            }
+            else
+            {
+                // After performance testing, 0.25 had the best performance.
+                eachBucketTxsLimit = _txsLimit / (0.25 * CPU_CORES);
+            }
+            if (c_fileLogLevel == LogLevel::TRACE) [[unlikely]]
+            {
+                TXPOOL_LOG(TRACE) << LOG_DESC("batchFetchTxs")
+                                  << LOG_KV("pendingTxs", m_txsTable.size())
+                                  << LOG_KV("limit", _txsLimit)
+                                  << LOG_KV("eachBucketTxsLimit", eachBucketTxsLimit);
+            }
+            m_txsTable.forEach<TxsMap::ReadAccessor>(m_knownLatestSealedTxHash, eachBucketTxsLimit,
+                _txsLimit, [&](TxsMap::ReadAccessor::Ptr accessor) {
+                    const auto& tx = accessor->value();
+                    handleTx(tx);
+                    return true;
+                });
         }
         else
         {
-            // After performance testing, 0.25 had the best performance.
-            eachBucketTxsLimit = _txsLimit / (0.25 * CPU_CORES);
+            m_txsTable.forEach<TxsMap::ReadAccessor>(
+                m_knownLatestSealedTxHash, [&](TxsMap::ReadAccessor::Ptr accessor) {
+                    const auto& tx = accessor->value();
+                    handleTx(tx);
+                    return (_txsList->transactionsMetaDataSize() +
+                               _sysTxsList->transactionsMetaDataSize()) < _txsLimit;
+                });
         }
-        if (c_fileLogLevel == LogLevel::TRACE) [[unlikely]]
-        {
-            TXPOOL_LOG(TRACE) << LOG_DESC("batchFetchTxs")
-                              << LOG_KV("pendingTxs", m_txsTable.size())
-                              << LOG_KV("limit", _txsLimit)
-                              << LOG_KV("eachBucketTxsLimit", eachBucketTxsLimit);
-        }
-        m_txsTable.forEach<TxsMap::ReadAccessor>(m_knownLatestSealedTxHash, eachBucketTxsLimit,
-            _txsLimit, [&](TxsMap::ReadAccessor::Ptr accessor) {
-                const auto& tx = accessor->value();
-                handleTx(tx);
-                return true;
-            });
     }
     else
     {

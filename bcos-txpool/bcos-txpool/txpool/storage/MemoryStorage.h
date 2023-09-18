@@ -57,7 +57,8 @@ class MemoryStorage : public TxPoolStorageInterface,
 public:
     // the default txsExpirationTime is 10 minutes
     explicit MemoryStorage(TxPoolConfig::Ptr _config, size_t _notifyWorkerNum = 2,
-        uint64_t _txsExpirationTime = TX_DEFAULT_EXPIRATION_TIME);
+        uint64_t _txsExpirationTime = TX_DEFAULT_EXPIRATION_TIME,
+        bool _packingChronologically = false);
     ~MemoryStorage() override { stop(); };
 
     // New interfaces =============
@@ -169,7 +170,7 @@ protected:
     TxPoolConfig::Ptr m_config;
 
     using TxsMap = BucketMap<bcos::crypto::HashType, bcos::protocol::Transaction::Ptr,
-        std::hash<bcos::crypto::HashType>, TransactionBucket>;
+        std::hash<bcos::crypto::HashType>>;
     TxsMap m_txsTable, m_invalidTxs;
 
     using HashSet = BucketSet<bcos::crypto::HashType, std::hash<bcos::crypto::HashType>>;
@@ -184,6 +185,8 @@ protected:
     uint64_t m_txsExpirationTime = TX_DEFAULT_EXPIRATION_TIME;
     // timer to clear up the expired txs in-period
     std::shared_ptr<Timer> m_cleanUpTimer;
+    // packaging txs in chronological order
+    bool m_packingChronologically = false;
 
     // for tps stat
     std::atomic_uint64_t m_tpsStatstartTime = {0};

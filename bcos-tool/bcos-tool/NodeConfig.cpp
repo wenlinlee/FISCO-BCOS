@@ -498,6 +498,8 @@ void NodeConfig::loadTxPoolConfig(boost::property_tree::ptree const& _pt)
     }
     // the txs expiration time, in second
     auto txsExpirationTime = checkAndGetValue(_pt, "txpool.txs_expiration_time", "600");
+    bool enablePackChronologically = _pt.get<bool>("txpool.packing_chronologically", false);
+    m_packChronologically = enablePackChronologically;
     if (txsExpirationTime * 1000 <= DEFAULT_MIN_CONSENSUS_TIME_MS) [[unlikely]]
     {
         NodeConfig_LOG(WARNING) << LOG_DESC(
@@ -513,7 +515,8 @@ void NodeConfig::loadTxPoolConfig(boost::property_tree::ptree const& _pt)
     NodeConfig_LOG(INFO) << LOG_DESC("loadTxPoolConfig") << LOG_KV("txpoolLimit", m_txpoolLimit)
                          << LOG_KV("notifierWorkers", m_notifyWorkerNum)
                          << LOG_KV("verifierWorkers", m_verifierWorkerNum)
-                         << LOG_KV("txsExpirationTime(ms)", m_txsExpirationTime);
+                         << LOG_KV("txsExpirationTime(ms)", m_txsExpirationTime)
+                         << LOG_KV("enablePackChronologically", m_packChronologically);
 }
 
 void NodeConfig::loadChainConfig(boost::property_tree::ptree const& _pt, bool _enforceGroupId)
