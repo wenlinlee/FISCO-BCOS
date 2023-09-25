@@ -95,7 +95,7 @@ public:
         }
         else
         {
-            if (c_fileLogLevel == LogLevel::DEBUG) [[unlikely]]
+            if (c_fileLogLevel == LogLevel::TRACE) [[unlikely]]
             {
                 TXPOOL_LOG(DEBUG) << "bucket not found the transaction,txHash: " << key;
             }
@@ -126,6 +126,14 @@ public:
             TXPOOL_LOG(WARNING) << LOG_DESC("bucket insert failed") << LOG_KV("txHash", key)
                                 << LOG_KV("timestamp", newData.timeStamp);
         }
+        else
+        {
+            if (c_fileLogLevel == LogLevel::DEBUG) [[unlikely]]
+            {
+                TXPOOL_LOG(DEBUG) << LOG_DESC("bucket insert succeeded") << LOG_KV("txHash", key);
+            }
+        }
+
         return {std::make_shared<IteratorImpl>(result.first), result.second};
     }
 
@@ -135,7 +143,20 @@ public:
     }
     void erase(std::shared_ptr<IteratorImpl> it_ptr)
     {
-        multiIndexMap.get<0>().erase(it_ptr->getIterator());
+        auto eraseIterator = multiIndexMap.get<0>().erase(it_ptr->getIterator());
+        if (eraseIterator != multiIndexMap.get<0>().end())
+        {
+            if (c_fileLogLevel == LogLevel::DEBUG) [[unlikely]]
+            {
+                TXPOOL_LOG(DEBUG) << LOG_DESC("erase bucket succeeded")
+                                  << LOG_KV("txHash", eraseIterator->txHash);
+            }
+        }
+        else
+        {
+            TXPOOL_LOG(WARNING) << LOG_DESC("erase bucket failed")
+                                << LOG_KV("txHash", eraseIterator->txHash);
+        }
     }
     size_t size() const { return multiIndexMap.size(); }
     void clear() { multiIndexMap.clear(); }

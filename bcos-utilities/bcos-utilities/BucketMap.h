@@ -141,6 +141,8 @@ public:
         auto it = m_values.find(key);
         if (it == m_values.end())
         {
+            BCOS_LOG(DEBUG) << LOG_DESC("find transaction failed, tx not found in bucket")
+                            << LOG_KV("txHash", key);
             return false;
         }
         else
@@ -158,6 +160,7 @@ public:
             accessor =
                 std::make_shared<WriteAccessor>(this->shared_from_this());  // acquire lock here
         }
+        BCOS_LOG(DEBUG) << LOG_DESC("insert transaction") << LOG_KV("txHash", kv.first);
         auto [it, inserted] = m_values.try_emplace(kv.first, kv.second);
         accessor->setValue(it);
         return inserted;
@@ -167,6 +170,7 @@ public:
     ValueType remove(const KeyType& key)
     {
         bcos::WriteGuard guard(m_mutex);
+        BCOS_LOG(DEBUG) << LOG_DESC("Remove tx") << LOG_KV("txHash", key);
 
         auto it = m_values.find(key);
         if (it == m_values.end())
