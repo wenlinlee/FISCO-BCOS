@@ -50,8 +50,8 @@ TxPoolFactory::TxPoolFactory(NodeIDPtr _nodeId, CryptoSuite::Ptr _cryptoSuite,
 {}
 
 
-TxPool::Ptr TxPoolFactory::createTxPool(
-    size_t _notifyWorkerNum, size_t _verifierWorkerNum, uint64_t _txsExpirationTime)
+TxPool::Ptr TxPoolFactory::createTxPool(size_t _notifyWorkerNum, size_t _verifierWorkerNum,
+    uint64_t _txsExpirationTime, bool _packingChronologically)
 {
     TXPOOL_LOG(INFO) << LOG_DESC("create transaction validator");
     auto txpoolNonceChecker = std::make_shared<TxPoolNonceChecker>();
@@ -63,8 +63,8 @@ TxPool::Ptr TxPoolFactory::createTxPool(
         m_ledger, txpoolNonceChecker, m_blockLimit, m_txpoolLimit);
 
     TXPOOL_LOG(INFO) << LOG_DESC("create transaction storage");
-    auto txpoolStorage =
-        std::make_shared<MemoryStorage>(txpoolConfig, _notifyWorkerNum, _txsExpirationTime);
+    auto txpoolStorage = std::make_shared<MemoryStorage>(
+        txpoolConfig, _notifyWorkerNum, _txsExpirationTime, _packingChronologically);
 
     auto syncMsgFactory = std::make_shared<TxsSyncMsgFactoryImpl>();
     TXPOOL_LOG(INFO) << LOG_DESC("create sync config");
