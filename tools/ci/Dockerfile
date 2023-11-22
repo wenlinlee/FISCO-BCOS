@@ -24,6 +24,8 @@ RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.21.0/cmake-3.2
     && rm -rf cmake-3.21.0-Linux-x86_64.sh \
     && cmake --version
 
+ENV PATH="/opt/cmake/bin:${PATH}"
+
 RUN git clone https://github.com/FISCO-BCOS/FISCO-BCOS.git && cd FISCO-BCOS \
     && git checkout ${SOURCE} && if [ "${TARGETARCH}" != "amd64" ]; then cmake -DARCH_NATIVE=on . ;else cmake .;fi && make -j2 && strip bin/fisco-bcos
 
