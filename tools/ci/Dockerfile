@@ -20,8 +20,9 @@ RUN apt-get -q update && apt-get install -qy --no-install-recommends \
 RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.21.0/cmake-3.21.0-Linux-x86_64.sh \
     && mkdir /opt/cmake \
     && sh cmake-3.21.0-Linux-x86_64.sh --prefix=/opt/cmake --skip-license \
-    && ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake \
-    && rm -rf cmake-3.21.0-Linux-x86_64.sh 
+    && sudo ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake \
+    && rm -rf cmake-3.21.0-Linux-x86_64.sh \
+    && cmake --version
 
 RUN git clone https://github.com/FISCO-BCOS/FISCO-BCOS.git && cd FISCO-BCOS \
     && git checkout ${SOURCE} && if [ "${TARGETARCH}" != "amd64" ]; then cmake -DARCH_NATIVE=on . ;else cmake .;fi && make -j2 && strip bin/fisco-bcos
