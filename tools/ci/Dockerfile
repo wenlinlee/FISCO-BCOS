@@ -20,7 +20,7 @@ RUN apt-get -q update && apt-get install -qy --no-install-recommends \
 RUN wget -q https://github.com/Kitware/CMake/releases/download/v3.21.0/cmake-3.21.0-Linux-x86_64.sh \
     && mkdir /opt/cmake \
     && sh cmake-3.21.0-Linux-x86_64.sh --prefix=/opt/cmake --skip-license \
-    && sudo ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake \
+    && ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake \
     && rm -rf cmake-3.21.0-Linux-x86_64.sh \
     && cmake --version
 
