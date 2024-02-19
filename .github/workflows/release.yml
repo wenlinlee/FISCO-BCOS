@@ -15,7 +15,7 @@ concurrency:
 jobs:
   compile_macOS_release:
     name: upload standard binary of macOS
-    runs-on: macos-12
+    runs-on: macos-14
     # runs-on: self-hosted-mac
     # if: startsWith(github.ref,'v2')
     steps:
@@ -254,7 +254,6 @@ jobs:
       - name: Build for Arm
         run: |
           export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
-          . /opt/rh/devtoolset-10/enable
           . /opt/rh/rh-perl530/enable
           export LIBCLANG_PATH=/opt/rh/llvm-toolset-7.0/root/lib64/
           . /opt/rh/llvm-toolset-7.0/enable
